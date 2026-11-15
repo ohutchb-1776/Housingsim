@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Who Can Afford Portland? — A Monte Carlo Housing Policy Simulation</title>
+  <meta name="description" content="An interactive Monte Carlo simulation of rents, rent burden, and displacement in five Portland, Maine neighborhoods under different housing policies." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎲</text></svg>" />
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Monte Carlo simulation · 5 neighborhoods · 5 policies · thousands of possible futures</p>
+    <h1>Who can afford Portland?</h1>
+    <p class="lede">
+      Nobody knows exactly what rents will be in 20 years. So instead of making one forecast, this model
+      plays out the future <strong>hundreds of times</strong>, each with different random luck: recessions,
+      demand swings, wage shocks, and uncertainty about how the housing market itself behaves.
+      The spread of outcomes shows what's likely, what's possible, and which policies change the odds.
+    </p>
+    <p class="byline">By Omari Brent · <span class="warn-inline">Starting inputs are illustrative assumptions, not verified Portland data.</span></p>
+  </div>
+</header>
+
+<nav class="topnav">
+  <div class="wrap">
+    <a href="#run">Run</a>
+    <a href="#results">Results</a>
+    <a href="#method">How it works</a>
+    <a href="#inside">Inside one run</a>
+    <a href="#sensitivity">Sensitivity</a>
+    <a href="#convergence">Convergence</a>
+    <a href="#inputs">Inputs</a>
+    <a href="#limits">Limitations</a>
+  </div>
+</nav>
+
+<main class="wrap">
+
+  <!-- ============ RUN ============ -->
+  <section id="run" class="panel run-panel">
+    <div class="run-grid">
+      <label>Simulations per policy
+        <select id="in-sims">
+          <option>100</option><option>250</option><option selected>500</option><option>1000</option><option>2000</option>
+        </select>
+      </label>
+      <label>Years
+        <input id="in-years" type="number" min="5" max="40" value="20" />
+      </label>
+      <label>Random seed
+        <span class="seed-row"><input id="in-seed" type="number" value="42" /><button id="btn-dice" class="ghost" title="New random seed">🎲</button></span>
+      </label>
+      <label class="check"><input id="in-custom" type="checkbox" /> Add my own policy</label>
+      <button id="btn-run" class="primary">Run simulation</button>
+    </div>
+
+    <div id="custom-policy" class="custom-policy hidden">
+      <h3>Design your own policy</h3>
+      <div class="slider-grid">
+        <label>Zoning relief <output id="o-zr"></output>
+          <input id="c-zr" type="range" min="0" max="0.9" step="0.05" value="0.3" />
+          <small>Share of zoning restrictiveness removed</small></label>
+        <label>Public units per year <output id="o-pu"></output>
+          <input id="c-pu" type="range" min="0" max="400" step="10" value="75" />
+          <small>Rented at 30% of income to low-income households</small></label>
+        <label>Displacement multiplier <output id="o-tp"></output>
+          <input id="c-tp" type="range" min="0.2" max="1" step="0.05" value="0.7" />
+          <small>1.0 = no tenant protections, 0.45 = strong protections</small></label>
+        <label>Construction multiplier <output id="o-cp"></output>
+          <input id="c-cp" type="range" min="0.7" max="1.3" step="0.05" value="1" />
+          <small>Below 1 = regulation slows building; above 1 = subsidies/fast permits</small></label>
+      </div>
+    </div>
+
+    <div class="progress"><div id="progress-bar"></div></div>
+    <p id="run-status" class="muted small">Ready.</p>
+  </section>
+
+  <!-- ============ RESULTS ============ -->
+  <section id="results">
+    <h2>Results <span class="muted" id="res-sub"></span></h2>
+
+    <div class="threshold-row">
+      Show the chance that city rent in the final year tops
+      $<input id="in-threshold" type="number" step="50" value="2500" />/month
+    </div>
+    <div id="cards" class="cards"></div>
+
+    <div class="panel">
+      <div class="chart-head">
+        <h3>How each measure evolves</h3>
+        <div class="controls">
+          <select id="sel-fan-metric"></select>
+          <label class="check"><input id="chk-paths" type="checkbox" checked /> show individual runs</label>
+        </div>
+      </div>
+      <p class="muted small">Line = median of all runs. Shaded band = middle 80% of runs (10th–90th percentile). Thin lines = individual simulated futures.</p>
+      <div id="chart-fan" class="chart tall"></div>
+    </div>
+
+    <div class="two-col">
+      <div class="panel">
+        <h3>The trade-off: rent vs. displacement</h3>
+        <p class="muted small">Every dot is one simulated future in the final year. Lower-left is better on both.</p>
+        <div id="chart-tradeoff" class="chart"></div>
+      </div>
+      <div class="panel">
+        <div class="chart-head">
+          <h3>Who gets to stay?</h3>
+          <select id="sel-stay-policy"></select>
+        </div>
+        <p class="muted small">Median share of residents by income group.</p>
+        <div id="chart-stay" class="chart"></div>
+      </div>
+    </div>
+
+    <div class="two-col">
+      <div class="panel">
+        <div class="chart-head">
+          <h3>Neighborhood by neighborhood</h3>
+          <select id="sel-heat">
+            <option value="rentchg">Rent change over the period (%)</option>
+            <option value="low">Low-income share in final year (%)</option>
+            <option value="rent">Final rent ($/month)</option>
+          </select>
+        </div>
+        <div id="chart-heat" class="chart"></div>
+      </div>
+      <div class="panel">
+        <div class="chart-head">
+          <h3>Range of final outcomes</h3>
+          <select id="sel-dist-metric"></select>
+        </div>
+        <p class="muted small">Histogram of the final-year value across all runs. Wider = more uncertain.</p>
+        <div id="chart-dist" class="chart"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Full results table</h3>
+      <p class="muted small">Final year. Each cell: median, with 10th–90th percentile range. <button id="btn-csv" class="ghost small-btn">⬇ Download all results (CSV)</button></p>
+      <div id="table-results" class="table-wrap"></div>
+    </div>
+  </section>
+
+  <!-- ============ METHOD ============ -->
+  <section id="method">
+    <h2>How it works</h2>
+
+    <div class="panel prose">
+      <h3>What is a Monte Carlo simulation?</h3>
+      <p>
+        A Monte Carlo simulation answers "what will happen?" when the answer depends on things that are random or unknown.
+        Instead of guessing one value for each unknown, you <strong>draw</strong> random values, run the model, record the result,
+        and repeat many times. The collection of results is an estimate of the full probability distribution of outcomes.
+        It's named after the Monte Carlo casino because it works like rolling dice over and over.
+      </p>
+      <div class="steps">
+        <div class="step"><span>1</span><b>Draw the unknowns</b><p>Each run picks its own values for 7 uncertain market parameters.</p></div>
+        <div class="step"><span>2</span><b>Simulate year by year</b><p>Each year, random shocks hit demand, wages, rents, and the economy. Households are displaced or move in.</p></div>
+        <div class="step"><span>3</span><b>Repeat</b><p><span class="js-sims">500</span> runs per policy, so <span class="js-total">2,500</span> simulated futures in total.</p></div>
+        <div class="step"><span>4</span><b>Summarize</b><p>Medians, percentile bands, and probabilities are computed from the pile of results.</p></div>
+      </div>
+      <p>
+        <strong>Fair comparisons.</strong> Run #<i>k</i> uses exactly the same random numbers under every policy
+        (a technique called <em>common random numbers</em>). If run #37 has a recession in year 6 under Status Quo,
+        it has the same recession under Zoning Reform. So differences between policies come from the policy, not from luck.
+        Every result is reproducible: the same seed always gives the same numbers.
+      </p>
+    </div>
+
+    <div class="panel prose">
+      <h3>Two kinds of uncertainty</h3>
+      <p>
+        <strong>1. Random events</strong> (aleatory uncertainty) are things that are random by nature: whether a recession hits,
+        how wages move, how popular a neighborhood gets. These are drawn fresh every year.
+      </p>
+      <p>
+        <strong>2. Unknown parameters</strong> (epistemic uncertainty) are fixed facts about how the market works that we
+        just don't know precisely, like how strongly rents respond to a shortage. Each run draws one value for each
+        from a <em>triangular distribution</em> (low, most likely, high) and keeps it for all years.
+        Including both makes the uncertainty bands honest.
+      </p>
+      <div id="table-uncertain" class="table-wrap"></div>
+      <p class="muted small">The small histograms show the actual values drawn across all runs in the last simulation.</p>
+    </div>
+
+    <div class="panel prose math">
+      <h3>The model, one year at a time</h3>
+      <p>
+        The city is split into 5 neighborhoods (<i>n</i>) and 4 income groups (<i>g</i>). Each year <i>t</i>, the model runs steps A–H.
+        Variables with an <span class="rand">orange</span> highlight are random draws.
+      </p>
+
+      <div class="eq-block">
+        <h4>A. Is the economy in a recession?</h4>
+        <p>The economy is a two-state Markov chain. A recession starts with probability $\lambda$ (an uncertain parameter) and continues with probability 0.35.</p>
+        $$P(R_t = 1 \mid R_{t-1}=0) = \lambda, \qquad P(R_t = 1 \mid R_{t-1}=1) = 0.35$$
+        <p>Recessions cut demand growth by 1 point, income growth by 3 points, and construction starts by 40%.</p>
+      </div>
+
+      <div class="eq-block">
+        <h4>B. Housing demand</h4>
+        <p>$D_{g,n,t}$ is the number of group-$g$ households that want to live in neighborhood $n$. It grows with the neighborhood's popularity, plus random citywide and local shocks, and shrinks when rents outpace inflation:</p>
+        $$D_{g,n,t} = D_{g,n,t-1}\Big(1 + \mu_n + a_g + \color{#f0883e}{\varepsilon^{\text{city}}_t} + \color{#f0883e}{\varepsilon^{\text{local}}_{n,t}} - \eta\, r_{n,t-1} - 0.01R_t\Big)$$
+        <p>$\mu_n$ = baseline demand growth, $a_g$ = group adjustment (higher earners growing faster), $r_{n,t-1}$ = last year's real rent growth, $\eta$ = demand elasticity, $\varepsilon \sim \mathcal{N}(0,\ 0.005^2)$.</p>
+      </div>
+
+      <div class="eq-block">
+        <h4>C. Incomes</h4>
+        $$Y_{g,n,t} = Y_{g,n,t-1}\Big(1 + \gamma_g + \color{#f0883e}{\omega_t} + \color{#f0883e}{\omega_{g,n,t}} - 0.03R_t\Big), \qquad \omega \sim \mathcal{N}(0,\ 0.012^2)$$
+        <p>$Y_{g,n,t}$ is the group's median income. Incomes vary <em>within</em> each group too (lognormal with spread $\sigma$). The model represents that spread with $K=25$ evenly spaced income levels:</p>
+        $$y_{k} = Y_{g,n,t}\, e^{\sigma z_k}, \qquad z_k = \Phi^{-1}\!\left(\tfrac{k+0.5}{K}\right), \quad k = 0,\dots,24$$
+        <p>This means "share of households" can be computed directly: each income level stands for 1/25 = 4% of the group.</p>
+      </div>
+
+      <div class="eq-block">
+        <h4>D. Construction (with a 2-year pipeline)</h4>
+        <p>Builders start more projects when rents are rising, but zoning limits how much they can build. Projects started now are finished in 2 years:</p>
+        $$\text{Starts}_{n,t} = U_{n,t}\cdot c_n \cdot \underbrace{\big(1 - 0.5\, Z_n (1-\rho_z)\big)}_{\text{zoning}} \cdot \max(0,\ 1 + \phi\, r_{n,t-1}) \cdot \kappa \cdot (1 - 0.4R_t)$$
+        $$U_{n,t} = U_{n,t-1} + \text{Starts}_{n,t-2}$$
+        <p>$U$ = market units, $c_n$ = base construction rate, $Z_n \in [0,1]$ = zoning restrictiveness, $\rho_z$ = policy's zoning relief, $\phi$ = supply response, $\kappa$ = policy construction multiplier. Public units are built on the same 2-year lag and filled by low-income households who pay 30% of income.</p>
+      </div>
+
+      <div class="eq-block">
+        <h4>E. Displacement</h4>
+        <p>Rent burden for each income level is $b_k = 12P_{n,t}/y_k$. The yearly chance of being forced out rises with burden above 30%:</p>
+        $$p_{g,n,t} = s_g\cdot\tau\cdot\frac{1}{K}\sum_{k}\min\!\Big(0.002 + \beta\max(b_k - 0.30,\ 0),\ 0.15\Big)$$
+        $$\color{#f0883e}{\text{Displaced}_{g,n,t} \sim \text{Binomial}\big(H_{g,n,t},\ p_{g,n,t}\big)}$$
+        <p>$s_g$ = how sensitive the group is to cost pressure (1.0 for low income, 0.1 for high), $\tau$ = the policy's displacement multiplier, scaled by how well protections work: $\tau = 1-(1-\tau_{\text{policy}})\,e$. Each household is effectively a coin flip with probability $p$; the binomial distribution counts how many "lose".</p>
+      </div>
+
+      <div class="eq-block">
+        <h4>F. Who moves in</h4>
+        <p>Landlords require income of at least 3× the rent. The share of each group that qualifies is:</p>
+        $$q_{g,n,t} = \frac{1}{K}\sum_k \mathbf{1}\big[y_k \ge 3\cdot 12P_{n,t}\big]$$
+        <p>Empty units (keeping 3% for normal turnover) go to waiting households in proportion to how many qualify, $W_{g,n,t}\,q_{g,n,t}$, where $W = \max(D - H, 0)$ is unmet demand. This is where gentrification happens: displaced low-income households are replaced mostly by higher earners.</p>
+      </div>
+
+      <div class="eq-block">
+        <h4>G. Rents</h4>
+        <p>Rents rise with <em>effective</em> demand (people who live there or could qualify to) relative to supply, measured against a healthy 5% vacancy:</p>
+        $$\text{Tightness}_{n,t} = \frac{H^{\text{mkt}}_{n,t} + \sum_g W_{g,n,t}\,q_{g,n,t}}{U_{n,t}} - 0.95$$
+        $$P_{n,t} = P_{n,t-1}\Big(1 + \pi + \theta\cdot\text{Tightness}_{n,t} + \color{#f0883e}{\varepsilon^{\text{rent}}_{n,t}}\Big), \qquad \pi = 2.5\%,\ \ \varepsilon^{\text{rent}} \sim \mathcal{N}(0,\ 0.015^2)$$
+        <p>Yearly rent growth is capped between −10% and +25%.</p>
+      </div>
+
+      <div class="eq-block">
+        <h4>H. Record</h4>
+        <p>The model records city rent (weighted by households), the share paying more than 30% of income, cumulative displacement, the low-income share, vacancy, and housing units. Public-housing tenants pay exactly 30%, so they don't count as burdened.</p>
+      </div>
+    </div>
+
+    <div class="panel prose math">
+      <h3>Turning thousands of runs into answers</h3>
+      <p>With $S$ runs producing outcomes $x_1, \dots, x_S$:</p>
+      <div class="three-col">
+        <div><b>Median and percentiles</b>$$\hat{q}_{p} = \text{the value below which } p\% \text{ of runs fall}$$</div>
+        <div><b>Probability of an event</b>$$\hat{P}(X > c) = \frac{1}{S}\sum_{s=1}^{S}\mathbf{1}[x_s > c]$$</div>
+        <div><b>Precision of the estimate</b>$$\text{SE}(\bar{x}) = \frac{s_x}{\sqrt{S}}, \quad \text{95\% CI} = \bar{x} \pm 1.96\,\text{SE}$$</div>
+      </div>
+      <p>The standard error shrinks with $\sqrt{S}$: 4× more runs makes the estimate 2× more precise. The <a href="#convergence">Convergence</a> section shows this happening.</p>
+    </div>
+  </section>
+
+  <!-- ============ INSIDE ONE RUN ============ -->
+  <section id="inside">
+    <h2>Inside one run</h2>
+    <div class="panel">
+      <p class="muted">Pick any single simulated future and see every random draw that produced it.</p>
+      <div class="controls wrap-controls">
+        <label>Policy <select id="sel-run-policy"></select></label>
+        <label>Run # <input id="in-run" type="number" min="0" value="0" /></label>
+        <button id="btn-run-rand" class="ghost">🎲 Random run</button>
+        <button id="btn-run-worst" class="ghost">Highest-rent run</button>
+        <button id="btn-run-best" class="ghost">Lowest-rent run</button>
+      </div>
+      <div id="run-params" class="param-chips"></div>
+      <div id="chart-run" class="chart"></div>
+      <div id="table-run" class="table-wrap"></div>
+    </div>
+  </section>
+
+  <!-- ============ SENSITIVITY ============ -->
+  <section id="sensitivity">
+    <h2>What drives the results?</h2>
+    <div class="two-col">
+      <div class="panel">
+        <div class="chart-head">
+          <h3>Sensitivity (tornado chart)</h3>
+          <span class="controls"><select id="sel-sens-policy"></select><select id="sel-sens-metric"></select></span>
+        </div>
+        <p class="muted small">
+          Spearman rank correlation between each uncertain input and the final-year outcome across all runs.
+          Long bars = that unknown matters most. +1 means higher input always means higher outcome.
+        </p>
+        <div id="chart-tornado" class="chart"></div>
+      </div>
+      <div class="panel">
+        <h3>Closer look</h3>
+        <p class="muted small">Click a bar on the left to see that input plotted against the outcome.</p>
+        <div id="chart-sens-scatter" class="chart"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ CONVERGENCE ============ -->
+  <section id="convergence">
+    <h2>Are there enough runs?</h2>
+    <div class="panel">
+      <div class="chart-head">
+        <h3>Convergence of the estimate</h3>
+        <select id="sel-conv-metric"></select>
+      </div>
+      <p class="muted small">
+        Running average of the final-year outcome as runs are added, with a 95% confidence band ($\bar{x} \pm 1.96\,s/\sqrt{S}$).
+        When the band is narrow and the line is flat, more runs wouldn't change the answer.
+      </p>
+      <div id="chart-conv" class="chart"></div>
+      <p id="conv-note" class="note"></p>
+    </div>
+  </section>
+
+  <!-- ============ INPUTS ============ -->
+  <section id="inputs">
+    <h2>Inputs</h2>
+    <div class="panel">
+      <h3>Neighborhoods <span class="muted small">(click a cell to edit, then re-run)</span></h3>
+      <div id="table-nbhd" class="table-wrap"></div>
+      <h3>Income groups</h3>
+      <div id="table-groups" class="table-wrap"></div>
+      <h3>Policies</h3>
+      <div id="table-policies" class="table-wrap"></div>
+      <button id="btn-reset" class="ghost">Reset inputs to defaults</button>
+    </div>
+  </section>
+
+  <!-- ============ LIMITS ============ -->
+  <section id="limits">
+    <h2>Limitations</h2>
+    <div class="panel prose">
+      <ul>
+        <li><b>Illustrative inputs.</b> Starting rents, households, units, incomes, and growth rates are reasonable-looking assumptions, not measured Portland data. Treat the dollar amounts as a demonstration; the <em>ranking</em> of policies and the shape of the trade-offs are the more meaningful output.</li>
+        <li><b>Policy effects are assumptions.</b> The 55% displacement reduction from tenant protections and the 10% construction penalty are modeling choices. Research on rent control (e.g. Diamond, McQuade &amp; Qian, 2019, on San Francisco) finds it protects existing tenants but shrinks rental supply; the exact sizes here are not estimated from Portland.</li>
+        <li><b>Neighborhoods don't interact.</b> Displaced households leave the model instead of moving to another neighborhood or nearby town.</li>
+        <li><b>One rent per neighborhood.</b> Real neighborhoods have cheap and expensive units side by side.</li>
+        <li><b>Parameter ranges are judgment calls.</b> The triangular distributions express plausible ranges, not estimates fitted to data. The sensitivity section shows which of these matter most, which is where better data would help.</li>
+        <li><b>No funding constraints.</b> Public housing and protections are assumed to be paid for; their cost and how it's raised aren't modeled.</li>
+      </ul>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>Runs entirely in your browser. All code is in this repository: the engine is <code>js/model.js</code>, random numbers are in <code>js/rng.js</code>.</p>
+    <p class="muted small">Random generator: xoshiro128** seeded per run with SplitMix32 · Normal draws: inverse-CDF (Acklam) · Charts: Plotly · Math: KaTeX</p>
+  </div>
+</footer>
+
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script src="js/rng.js"></script>
+<script src="js/model.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
